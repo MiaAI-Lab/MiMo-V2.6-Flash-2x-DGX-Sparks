@@ -12,11 +12,6 @@ Serve [XiaomiMiMo/MiMo-V2.6-Flash-RL](https://huggingface.co/XiaomiMiMo/MiMo-V2.
 with SGLang on **two** DGX Sparks (GB10, SM121, 121.7 GiB unified memory each)
 over ConnectX-7 RoCE, behind one OpenAI-compatible endpoint on the head.
 
-The upstream recipe is 4x B300 on a single node. This is the two-Spark port:
-TP=2/EP=2, ~82 GiB of weights resident per rank, the routed experts kept in
-their stored 4-bit layout, and the checkpoint shared to the worker over NFS so
-only the head holds a copy.
-
 ## Status
 
 Honest state of this kit. Nothing below is projected — every number is from a
