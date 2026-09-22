@@ -1,0 +1,44 @@
+--- a/sglang/srt/models/mimo_v2.py
++++ b/sglang/srt/models/mimo_v2.py
+@@ -1388,17 +1388,8 @@
+             "forward() should not be called in encoder_only mode"
+         )
+ 
+-        aux_hidden_states = None
+-        if self.capture_aux_hidden_states:
+-            hidden_states, hidden_states_before_norm, aux_hidden_states = self.model(
+-                input_ids,
+-                positions,
+-                forward_batch,
+-                input_embeds,
+-                pp_proxy_tensors=pp_proxy_tensors,
+-            )
+-        elif self._is_multimodal:
+-            hidden_states, hidden_states_before_norm = general_mm_embed_routine(
++        if self._is_multimodal:
++            model_output = general_mm_embed_routine(
+                 input_ids=input_ids,
+                 forward_batch=forward_batch,
+                 language_model=self.model,
+@@ -1407,7 +1398,7 @@
+                 pp_proxy_tensors=pp_proxy_tensors,
+             )
+         else:
+-            hidden_states, hidden_states_before_norm = self.model(
++            model_output = self.model(
+                 input_ids,
+                 positions,
+                 forward_batch,
+@@ -1415,6 +1406,12 @@
+                 pp_proxy_tensors=pp_proxy_tensors,
+             )
+ 
++        aux_hidden_states = None
++        if self.capture_aux_hidden_states:
++            hidden_states, hidden_states_before_norm, aux_hidden_states = model_output
++        else:
++            hidden_states, hidden_states_before_norm = model_output
++
+         if self.pp_group.is_last_rank:
+             return self.logits_processor(
+                 input_ids,
