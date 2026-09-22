@@ -35,6 +35,11 @@ else to a Spark.
 
 ## Requirements
 
+When updating an existing installation, rebuild the image on both ranks with
+`./start.sh build` before serving. The [image corrections](patches/README.md#mimo-vision-windows-and-key-zero-bias)
+require the patched engine image and matching Python hook, including DFlash's
+image-forwarding fix.
+
 - 2x DGX Spark (GB10), one GPU each, linked over ConnectX-7. A single Spark
   cannot serve this model at all — 161 GiB of weights on a 121.7 GiB box.
 - ~161 GiB of free disk on the head for the checkpoint, plus Docker.

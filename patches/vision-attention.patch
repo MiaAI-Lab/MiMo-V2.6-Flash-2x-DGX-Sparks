@@ -1,0 +1,141 @@
+--- a/sglang/kernels/ops/attention/prefill_attention.py
++++ b/sglang/kernels/ops/attention/prefill_attention.py
+@@ -36,6 +36,7 @@
+     Q,
+     K,
+     V,
++    Key0_Sink,
+     sm_scale,
+     B_Start_Loc,
+     B_Seqlen,
+@@ -54,6 +55,9 @@
+     BLOCK_N: tl.constexpr,
+     IS_CAUSAL: tl.constexpr,
+     Lk: tl.constexpr,
++    WINDOW_LEFT: tl.constexpr,
++    WINDOW_RIGHT: tl.constexpr,
++    HAS_KEY0_SINK: tl.constexpr,
+ ):
+     cur_batch = tl.program_id(0)
+     cur_head = tl.program_id(1)
+@@ -101,7 +105,12 @@
+         if not IS_CAUSAL
+         else tl.minimum((start_m + 1) * BLOCK_M, cur_batch_seq_len)
+     )
+-    for start_n in range(0, block_mask * end_n, BLOCK_N):
++    begin_n = 0
++    if WINDOW_LEFT >= 0:
++        begin_n = tl.maximum(0, (block_start_loc - WINDOW_LEFT) // BLOCK_N * BLOCK_N)
++    if WINDOW_RIGHT >= 0:
++        end_n = tl.minimum(end_n, (start_m + 1) * BLOCK_M + WINDOW_RIGHT)
++    for start_n in range(begin_n, block_mask * end_n, BLOCK_N):
+         start_n = tl.multiple_of(start_n, BLOCK_N)
+         # -- compute qk ----
+         k = tl.load(
+@@ -115,6 +124,18 @@
+         qk += tl.dot(q, k)
+         qk *= sm_scale
+ 
++        # MiMo vision: learned bias on the real first key of EACH sequence,
++        # not a null/value-less sink. Window masking below still applies.
++        if HAS_KEY0_SINK:
++            qk += tl.where(start_n + offs_n[None, :] == 0,
++                           tl.load(Key0_Sink + cur_head).to(tl.float32), 0.0)
++        if WINDOW_LEFT >= 0:
++            qk += tl.where(start_n + offs_n[None, :] >= offs_m[:, None] - WINDOW_LEFT,
++                           0.0, float("-inf"))
++        if WINDOW_RIGHT >= 0:
++            qk += tl.where(start_n + offs_n[None, :] <= offs_m[:, None] + WINDOW_RIGHT,
++                           0.0, float("-inf"))
++
+         if IS_CAUSAL:
+             qk += tl.where(
+                 (start_n + offs_n[None, :] < cur_batch_seq_len)
+@@ -129,6 +150,9 @@
+ 
+         # -- compute m_ij, p, l_ij
+         m_ij = tl.max(qk, 1)
++        if WINDOW_LEFT >= 0 or WINDOW_RIGHT >= 0:
++            # A window can fully mask one key tile for otherwise valid rows.
++            m_ij = tl.where(m_ij == float("-inf"), -1.0e20, m_ij)
+         p = tl.exp(qk - m_ij[:, None])
+         l_ij = tl.sum(p, 1)
+         # -- update m_i and l_i
+@@ -136,12 +160,16 @@
+         alpha = tl.exp(m_i - m_i_new)
+         beta = tl.exp(m_ij - m_i_new)
+         l_i_new = alpha * l_i + beta * l_ij
++        if WINDOW_LEFT >= 0 or WINDOW_RIGHT >= 0:
++            denominator = tl.where(l_i_new > 0, l_i_new, 1.0)
++        else:
++            denominator = l_i_new
+         # -- update output accumulator --
+         # scale p
+-        p_scale = beta / l_i_new
++        p_scale = beta / denominator
+         p = p * p_scale[:, None]
+         # scale acc
+-        acc_scale = l_i / l_i_new * alpha
++        acc_scale = l_i / denominator * alpha
+         acc = acc * acc_scale[:, None]
+         # update acc
+         v = tl.load(
+@@ -168,7 +196,8 @@
+ 
+ 
+ def context_attention_fwd(
+-    q, k, v, o, b_start_loc, b_seq_len, max_input_len, is_causal=True, sm_scale=None
++    q, k, v, o, b_start_loc, b_seq_len, max_input_len, is_causal=True, sm_scale=None,
++    window_size=(-1, -1), key0_sink=None,
+ ):
+     """
+     q, k, v: [b * s, head, head_dim]
+@@ -176,6 +205,8 @@
+     b_seq_len: [b]
+     out: [b * s, head, head_dim]
+     sm_scale: softmax scale, defaults to 1/sqrt(head_dim)
++    window_size: inclusive (left, right) distances; negative means unbounded.
++    key0_sink: optional per-Q-head real-key-zero logit bias (MiMo vision only).
+     """
+     if (_is_cuda or _is_hip) and CUDA_CAPABILITY[0] > 8:
+         BLOCK = 128
+@@ -188,6 +219,9 @@
+         sm_scale = 1.0 / (Lq**0.5)
+     batch, head = b_seq_len.shape[0], q.shape[1]
+     kv_group_num = q.shape[1] // k.shape[1]
++    if key0_sink is not None:
++        assert key0_sink.is_cuda and key0_sink.ndim == 1
++        assert key0_sink.numel() == head and key0_sink.is_contiguous()
+ 
+     grid = (batch, head, triton.cdiv(max_input_len, BLOCK))
+     num_warps = 4 if Lk <= 64 else 8
+@@ -196,6 +230,7 @@
+         q,
+         k,
+         v,
++        key0_sink if key0_sink is not None else q,
+         sm_scale,
+         b_start_loc,
+         b_seq_len,
+@@ -216,4 +251,7 @@
+         num_warps=num_warps,
+         num_stages=1,
+         Lk=Lk,
++        WINDOW_LEFT=window_size[0],
++        WINDOW_RIGHT=window_size[1],
++        HAS_KEY0_SINK=key0_sink is not None,
+     )
+--- a/sglang/srt/layers/attention/vision.py
++++ b/sglang/srt/layers/attention/vision.py
+@@ -515,6 +515,11 @@
+             max_seqlen,
+             is_causal=False,
+             sm_scale=softmax_scale,
++            # Only the task's MiMoVisionBlock binding opts into these semantics.
++            window_size=kwargs.get("window_size", (-1, -1))
++            if getattr(self, "mimo_vision_key0_sink", False) else (-1, -1),
++            key0_sink=kwargs.get("s_aux")
++            if getattr(self, "mimo_vision_key0_sink", False) else None,
+         )
+ 
+         return output
