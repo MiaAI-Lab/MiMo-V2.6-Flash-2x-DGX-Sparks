@@ -1002,11 +1002,14 @@ tests/                arg planner + memory preflight, stop/restart guard rails,
   `SGLANG_FLASHINFER_MOE_FUSED_FINALIZE=0` from a DeepSeek-V4.1 profile, and
   the GB10 UVM/swap hygiene notes from a GLM-5.3 one.
 
-> **License: not yet chosen.** There is no `LICENSE` file in this repository
-> yet, so default copyright applies and nobody else has permission to reuse
-> it. Pick one before publishing. Note the constraint if you care about
-> matching the neighbours: this kit carries no SGLang source, so it is not
-> obliged to inherit Apache-2.0, but the sibling Spark kits are AGPL-3.0.
+## License
+
+Copyright (C) 2026 Mia'a AI Lab.
+
+This repository is licensed under the **GNU Affero General Public License v3.0**
+([LICENSE](LICENSE)). If you run a modified version as a network service, the
+AGPL requires you to offer its source to the users of that service. Model
+weights are Xiaomi's and are not part of this repository.
 
 ## Tests
 
