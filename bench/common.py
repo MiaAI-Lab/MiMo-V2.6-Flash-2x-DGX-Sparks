@@ -164,7 +164,7 @@ def stream_chat(model: str, messages: list[dict], *, max_tokens: int, timeout: f
             status = resp.status
             buf = b""
             while True:
-                piece = resp.read(4096)
+                piece = resp.read1(4096)
                 if not piece:
                     break
                 buf += piece
