@@ -1,0 +1,66 @@
+# ─── local configuration ─────────────────────────────────────────────────────
+# .env holds this fleet's IPs, ssh user and paths. .env.example is the tracked
+# template that start.sh copies from on first run.
+.env
+!.env.example
+
+# ─── runtime state, per-fleet and not portable ───────────────────────────────
+state/
+logs/
+bench/results/
+
+# ─── secrets ─────────────────────────────────────────────────────────────────
+*.pem
+*.key
+api-key
+*.token
+
+# ─── model weights: never in git ─────────────────────────────────────────────
+# The checkpoint is ~161 GiB. It lives at $MODEL_DIR and is fetched with
+# `./start.sh download` from the pinned HF revision.
+models/
+*.safetensors
+*.bin
+*.pt
+*.gguf
+*.npz
+
+# ─── docker / image transfer artifacts ───────────────────────────────────────
+# `./start.sh build` pipes `docker save` straight over ssh, but a manual
+# save lands a multi-GB tarball here.
+*.tar
+*.tar.gz
+*.tgz
+
+# ─── profiling and capture output ────────────────────────────────────────────
+trace*.json
+*.json.gz
+*.nsys-rep
+*.qdrep
+*.sqlite
+
+# ─── python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+venv/
+
+# ─── editors and OS ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ─── scratch ─────────────────────────────────────────────────────────────────
+tmp/
+scratch/
+*.orig
+*.rej
+*.bak
