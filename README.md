@@ -853,6 +853,53 @@ MoE, FP8 E4M3 KV. Override with `ATTENTION_BACKEND`, `MM_ATTENTION_BACKEND`,
 `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False` is set because expandable
 segments produced NaN logits on this same GB10 stack with another SGLang model.
 
+### Long-context attention on GB10
+
+The 9 full-attention layers read the whole prefix every step, so they dominate
+long prompts. Three image-level patches cover them; switch them off in `.env` to
+fall back to the stock kernels:
+
+| Switch (default) | What it does |
+|---|---|
+| `SGLANG_MIMO_CUDA_VERIFY=1` | grouped-head split-KV kernel for EAGLE/DFlash target verify (`patches/mimo_cuda_verify.py`) |
+| `SGLANG_MIMO_PREFILL_IMPL=flashinfer` | FlashInfer FA2 paged prefill for prefixes ≥ `SGLANG_MIMO_PREFILL_MIN_PREFIX` (16384); needs `patches/flashinfer-fp8-qk192-vo128.patch` ([flashinfer#5085](https://github.com/flashinfer-ai/flashinfer/pull/5085)) |
+| `SGLANG_MIMO_PREFILL_GROUPED=1` | grouped Triton prefill kernel, the fallback for any batch FlashInfer refuses (`patches/mimo_prefill_grouped.py`) |
+
+Head logs print `MIMO_CUDA_VERIFY_DISPATCH` once per captured verify batch size
+and `MIMO_PREFILL_GROUPED_DISPATCH flashinfer-fa2` at the first long prefill.
+`MIMO_PREFILL_FLASHINFER_FALLBACK` names any batch that went to the Triton fallback.
+
+Measured on two GB10s, TP=2, FP8 KV, one request, 384–512 output tokens, thinking
+off, greedy:
+
+| Prompt | Stock decode | Patched, EAGLE | Patched, DFlash (code / JSON / prose) | Stock → patched cold TTFT |
+|---|---:|---:|---:|---:|
+| 128k | 17.1 tok/s | 35.5 tok/s | 48.7 / 68.6 / 33.2 tok/s | 87 s → 68 s |
+| 512k | 6.6 tok/s | 29.0 tok/s | 39.7 / 56.6 / 33.0 tok/s | 945 s → 615 s |
+
+With thinking on, T=1.0 and top_p=0.95, DFlash decodes at 42.6 / 67.4 / 32.2 tok/s at
+128k (code / JSON / prose). EAGLE gets 37.4 / 43.4 / 30.8 tok/s on the same prompts.
+
+Notes from these runs:
+
+- DFlash beats EAGLE on long prompts even for prose. With DFlash, `MAX_TOTAL_TOKENS=2299968`
+  tripped the memory guard during graph capture once the verify workspace was in;
+  `1500000` boots and still holds two 600k sessions.
+- Several sessions at once stay bandwidth-bound on the MoE weights, not on attention:
+  - 4–6 concurrent agents get about 15–19 tok/s each.
+  - MoE takes about 60% of GPU time at 4 concurrent requests.
+- A new request waits behind a long prompt that is already prefilling, because
+  SGLang chunks one request at a time.
+- We tried several other options and none improved this workload:
+  - `--schedule-policy shortest-prefill-first`,
+  - `--prefill-decode-interval`,
+  - DFlash with 4 draft tokens,
+  - 2 NCCL channels,
+  - HiCache at a 1.5M pool, which did not fit in memory.
+- Quality: a synthetic suite (24 needles at 128k/512k, 10 checked prompts, logprob
+  comparison) is unchanged. The new prefill kernels are closer to FP32 than the
+  stock kernel: 0.2–0.4% relative L2 error, against 4%.
+
 ## Benchmarks
 
 Ported from the GLM-5.3-Flash 2x-Spark kit, adapted for SGLang. **Run them
