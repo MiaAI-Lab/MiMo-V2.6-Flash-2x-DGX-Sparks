@@ -880,6 +880,10 @@ off, greedy:
 With thinking on, T=1.0 and top_p=0.95, DFlash decodes at 42.6 / 67.4 / 32.2 tok/s at
 128k (code / JSON / prose). EAGLE gets 37.4 / 43.4 / 30.8 tok/s on the same prompts.
 
+`.env.example` sets `EXTRA_SGLANG_ARGS=--flashinfer-mxfp4-moe-precision=bf16` (BF16 activations in the MXFP4 MoE).
+With 4 concurrent agents, per-turn decode rose from 17.0 to 17.3–19.0 tok/s; with thinking on, single sessions are +1–13%.
+Greedy outputs on the regression set are unchanged.
+
 Notes from these runs:
 
 - DFlash beats EAGLE on long prompts even for prose. With DFlash, `MAX_TOTAL_TOKENS=2299968`
