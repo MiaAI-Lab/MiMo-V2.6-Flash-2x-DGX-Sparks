@@ -1,0 +1,241 @@
+MiMo full-attention layers on GB10 (SM121), TP=2:
+- split-KV grouped-head kernel for EAGLE/DFlash target VERIFY (SGLANG_MIMO_CUDA_VERIFY)
+- FlashInfer FA2 paged prefill (SGLANG_MIMO_PREFILL_IMPL=flashinfer) with a grouped Triton
+  fallback (SGLANG_MIMO_PREFILL_GROUPED) for prefixes >= SGLANG_MIMO_PREFILL_MIN_PREFIX
+Applied after the recipe patches; the kernels live in mimo_cuda_verify.py / mimo_prefill_grouped.py.
+
+diff --git a/sglang/srt/layers/attention/triton_backend.py b/sglang/srt/layers/attention/triton_backend.py
+index 8273d37..b8d3357 100644
+--- a/sglang/srt/layers/attention/triton_backend.py
++++ b/sglang/srt/layers/attention/triton_backend.py
+@@ -222,6 +222,33 @@ class TritonAttnBackend(AttentionBackend):
+         self.target_verify_num_tokens_per_req = model_runner.decode_num_tokens_per_req()
+         self.speculative_num_steps = get_spec().speculative_num_steps
+         self.topk = get_spec().speculative_eagle_topk or 0
++        # Experimental MiMo SM121 full-attention target VERIFY dispatch.
++        import os
++        self.mimo_cuda_verify_enabled = (
++            os.environ.get("SGLANG_MIMO_CUDA_VERIFY", "0") == "1"
++            and not model_runner.is_draft_worker
++            and torch.cuda.get_device_capability() == (12, 1)
++            and "mimo" in str(getattr(model_runner.model_config.hf_config, "model_type", "")).lower()
++            and self.topk == 1
++        )
++        self.mimo_cuda_verify_cache = {}
++        self.mimo_cuda_verify_announced = set()
++        self.mimo_cuda_verify_debug = os.environ.get("SGLANG_MIMO_CUDA_VERIFY_DEBUG", "0") == "1"
++        # Experimental grouped prefill for MiMo full-attention layers (extend only).
++        self.mimo_prefill_enabled = (
++            os.environ.get("SGLANG_MIMO_PREFILL_GROUPED", "0") == "1"
++            and not model_runner.is_draft_worker
++            and torch.cuda.get_device_capability() == (12, 1)
++            and "mimo" in str(getattr(model_runner.model_config.hf_config, "model_type", "")).lower()
++        )
++        self.mimo_prefill_min_prefix = int(os.environ.get("SGLANG_MIMO_PREFILL_MIN_PREFIX", "16384"))
++        self.mimo_prefill_announced = False
++        # "flashinfer" uses FA2 paged prefill (needs the FP8 192/128 header fix).
++        self.mimo_prefill_impl = os.environ.get("SGLANG_MIMO_PREFILL_IMPL", "triton")
++        self.mimo_fi_wrapper = None
++        self.mimo_fi_plan_key = None
++        self.mimo_fi_errors = set()
++        self.mimo_cuda_verify_debug_seen = set()
+         # Split-KV verify is bit-equivalent only for a pure-causal chain (topk==1)
+         # and is gfx95-only; else fall back to extend_attention_fwd.
+         self.use_verify_splitkv = (
+@@ -715,6 +742,90 @@ class TritonAttnBackend(AttentionBackend):
+             )
+         return qo_indptr, kv_indptr, num_tokens_per_req
+ 
++    def _mimo_prefill_flashinfer(self, q, o, layer, forward_batch, kv_indptr, kv_indices, k_scale, v_scale):
++        """FA2 paged prefill over prefix + fresh tokens already written to the FP8 cache.
++
++        Planned once per forward batch and shared by all full-attention layers.
++        Returns False (caller falls back to Triton) if planning fails.
++        """
++        try:
++            import itertools
++
++            import flashinfer
++            from sglang.kernels.ops.attention.extend_attention import build_unified_kv_indices
++
++            key = id(forward_batch)
++            if self.mimo_fi_plan_key != key:
++                if self.mimo_fi_wrapper is None:
++                    self.mimo_fi_wrapper = flashinfer.BatchPrefillWithPagedKVCacheWrapper(
++                        torch.empty(512 << 20, dtype=torch.uint8, device=self.device), "NHD"
++                    )
++                bs = forward_batch.batch_size
++                new_loc = (
++                    self.forward_metadata.out_cache_loc_full_physical
++                    if self.forward_metadata.out_cache_loc_full_physical is not None
++                    else forward_batch.out_cache_loc
++                )
++                unified_indptr, unified_indices, _ = build_unified_kv_indices(
++                    kv_indptr, kv_indices, forward_batch.extend_start_loc,
++                    forward_batch.extend_seq_lens, new_loc, bs,
++                )
++                # Host indptrs from the batch's CPU lengths: the shared GPU qo_indptr buffer
++                # can already hold a later batch's metadata (overlap scheduling, verify
++                # graphs) when plan() copies it to the host.
++                ext_cpu = list(forward_batch.extend_seq_lens_cpu)
++                pre_cpu = list(forward_batch.extend_prefix_lens_cpu)
++                qo_cpu = torch.tensor([0] + list(itertools.accumulate(ext_cpu)), dtype=torch.int32)
++                kv_cpu = torch.tensor(
++                    [0] + list(itertools.accumulate(p + e for p, e in zip(pre_cpu, ext_cpu))),
++                    dtype=torch.int32,
++                )
++                self.mimo_fi_wrapper.plan(
++                    qo_cpu, kv_cpu,
++                    unified_indices.to(torch.int32), torch.ones(bs, dtype=torch.int32, device=self.device),
++                    32, 2, 192, 1, head_dim_vo=128, causal=True, sm_scale=layer.scaling,
++                    q_data_type=torch.bfloat16, kv_data_type=torch.float8_e4m3fn, o_data_type=torch.bfloat16,
++                )
++                self.mimo_fi_plan_key = key
++            k_buf = self.token_to_kv_pool.get_key_buffer(layer.layer_id)
++            v_buf = self.token_to_kv_pool.get_value_buffer(layer.layer_id)
++            # The token batch can be padded past the real extend tokens; FlashInfer
++            # needs exactly qo_indptr[-1] rows, padded rows stay untouched.
++            total = sum(forward_batch.extend_seq_lens_cpu)
++            out = self.mimo_fi_wrapper.run(
++                q.view(-1, 32, 192)[:total], (k_buf.view(-1, 1, 2, 192), v_buf.view(-1, 1, 2, 128)),
++                k_scale=k_scale, v_scale=v_scale,
++            )
++            o.view(-1, 32, 128)[:total].copy_(out)
++            if not self.mimo_prefill_announced:
++                print("MIMO_PREFILL_GROUPED_DISPATCH flashinfer-fa2", flush=True)
++                self.mimo_prefill_announced = True
++            return True
++        except Exception as exc:  # this batch falls back to Triton; log each distinct error once
++            msg = f"{type(exc).__name__}: {exc}"
++            if msg not in self.mimo_fi_errors:
++                self.mimo_fi_errors.add(msg)
++                print(f"MIMO_PREFILL_FLASHINFER_FALLBACK {msg}", flush=True)
++            self.mimo_fi_plan_key = None
++            return False
++
++    def _prepare_mimo_cuda_verify(self, bs, width):
++        if not self.mimo_cuda_verify_enabled or width not in (3, 4, 5, 6, 8):
++            return None
++        key = (bs, width)
++        if key not in self.mimo_cuda_verify_cache:
++            if torch.cuda.is_current_stream_capturing():
++                return None
++            from sglang.srt.layers.attention.mimo_cuda_verify import FullVerifyExperiment, LayoutReceipt
++            # TARGET_VERIFY builders create uniform arange qo_indptr.
++            # Topk1 scheduler guarantees a causal chain with committed prefix.
++            layout = LayoutReceipt(bs, width, True, True, True, self.page_size)
++            self.mimo_cuda_verify_cache[key] = FullVerifyExperiment(
++                layout, variant="grouped", splits=32, block_h=16,
++                block_n=64, warps=4, device=self.device,
++            )
++        return self.mimo_cuda_verify_cache[key]
++
+     def init_forward_metadata_out_graph(
+         self,
+         forward_batch: ForwardBatch,
+@@ -1762,6 +1873,105 @@ class TritonAttnBackend(AttentionBackend):
+             k_descale = 1.0
+             v_descale = 1.0
+ 
++        if (
++            self.mimo_cuda_verify_debug
++            and forward_batch.forward_mode.is_target_verify()
++            and sliding_window_size == -1
++            and layer.qk_head_dim == 192
++        ):
++            # Debug: report which dispatch predicate fails, once per signature.
++            preds = dict(
++                enabled=self.mimo_cuda_verify_enabled, causal=causal,
++                sinks=sinks is None, score_mod=score_mod is None,
++                aux=aux_tensors is None, softcap=not logits_soft_cap,
++                xai=(layer.xai_temperature_len is None or layer.xai_temperature_len <= 0),
++                dcp=self.dcp_size == 1, q_heads=layer.tp_q_head_num,
++                v_dim=layer.v_head_dim,
++            )
++            sig = (forward_batch.batch_size, self.forward_metadata.max_extend_len,
++                   torch.cuda.is_current_stream_capturing(), tuple(preds.items()))
++            if sig not in self.mimo_cuda_verify_debug_seen:
++                self.mimo_cuda_verify_debug_seen.add(sig)
++                print(f"MIMO_CUDA_VERIFY_DEBUG bs={sig[0]} width={sig[1]} capturing={sig[2]} {preds}", flush=True)
++        if (
++            self.mimo_cuda_verify_enabled
++            and forward_batch.forward_mode.is_target_verify()
++            and causal and sliding_window_size == -1
++            # topk=1 makes any verify mask a plain causal chain; ragged (DSpark)
++            # layouts break the uniform qo_indptr the kernel assumes.
++            and getattr(forward_batch.spec_info, "ragged_verify_layout", None) is None
++            and sinks is None and score_mod is None and aux_tensors is None
++            and not logits_soft_cap
++            and (layer.xai_temperature_len is None or layer.xai_temperature_len <= 0)
++            and self.dcp_size == 1
++            and layer.tp_q_head_num == 32 and layer.qk_head_dim == 192
++            and layer.v_head_dim == 128
++        ):
++            verify = self._prepare_mimo_cuda_verify(
++                forward_batch.batch_size, self.forward_metadata.max_extend_len
++            )
++            if verify is not None and verify.run(
++                q.view(-1, 32, 192), k.contiguous(), v.contiguous(),
++                o.view(-1, 32, 128),
++                self.token_to_kv_pool.get_key_buffer(layer.layer_id),
++                self.token_to_kv_pool.get_value_buffer(layer.layer_id),
++                self.forward_metadata.qo_indptr, kv_indptr, kv_indices,
++                k_descale, v_descale, layer.scaling,
++            ):
++                key = (forward_batch.batch_size, self.forward_metadata.max_extend_len)
++                if key not in self.mimo_cuda_verify_announced:
++                    print("MIMO_CUDA_VERIFY_DISPATCH grouped S32 H16 N64 W4", flush=True)
++                    self.mimo_cuda_verify_announced.add(key)
++                return o
++            if self.mimo_cuda_verify_debug:
++                reason = "prepare=None" if verify is None else f"reject={getattr(verify, 'last_reject', None)}"
++                sig = ("fail", forward_batch.batch_size, self.forward_metadata.max_extend_len, reason)
++                if sig not in self.mimo_cuda_verify_debug_seen:
++                    self.mimo_cuda_verify_debug_seen.add(sig)
++                    print(f"MIMO_CUDA_VERIFY_DEBUG fallback bs={sig[1]} width={sig[2]} {reason} "
++                          f"capturing={torch.cuda.is_current_stream_capturing()} "
++                          f"q={tuple(q.shape)} k={tuple(k.shape)} kb={tuple(self.token_to_kv_pool.get_key_buffer(layer.layer_id).shape)} "
++                          f"kbdt={self.token_to_kv_pool.get_key_buffer(layer.layer_id).dtype} qdt={q.dtype} "
++                          f"qo={self.forward_metadata.qo_indptr.dtype} kvp={kv_indptr.dtype} kvi={kv_indices.dtype} "
++                          f"ks={type(k_descale).__name__}", flush=True)
++
++        if (
++            self.mimo_prefill_enabled
++            and forward_batch.forward_mode.is_extend()
++            and not forward_batch.forward_mode.is_target_verify()
++            and not forward_batch.forward_mode.is_draft_extend_v2()
++            and forward_batch.extend_prefix_lens_cpu is not None
++            and max(forward_batch.extend_prefix_lens_cpu, default=0) >= self.mimo_prefill_min_prefix
++            and causal and sliding_window_size == -1
++            and sinks is None and score_mod is None and aux_tensors is None
++            and not logits_soft_cap
++            and (layer.xai_temperature_len is None or layer.xai_temperature_len <= 0)
++            and self.dcp_size == 1 and not self.enable_deterministic
++            and self.forward_metadata.custom_mask is None
++            and layer.tp_q_head_num == 32 and layer.qk_head_dim == 192 and layer.v_head_dim == 128
++            and q.dtype == torch.bfloat16 and k.dtype == torch.bfloat16
++            and self.token_to_kv_pool.get_key_buffer(layer.layer_id).dtype == torch.float8_e4m3fn
++            and self.token_to_kv_pool.get_key_buffer(layer.layer_id).ndim == 3
++            and isinstance(k_descale, float) and isinstance(v_descale, float)
++            and not torch.cuda.is_current_stream_capturing()
++        ):
++            if self.mimo_prefill_impl == "flashinfer" and self._mimo_prefill_flashinfer(
++                q, o, layer, forward_batch, kv_indptr, kv_indices, k_descale, v_descale
++            ):
++                return o
++            from sglang.srt.layers.attention.mimo_prefill_grouped import mimo_prefill_grouped
++            mimo_prefill_grouped(
++                q.view(-1, 32, 192), k.contiguous(), v.contiguous(), o.view(-1, 32, 128),
++                self.token_to_kv_pool.get_key_buffer(layer.layer_id),
++                self.token_to_kv_pool.get_value_buffer(layer.layer_id),
++                self.forward_metadata.qo_indptr, kv_indptr, kv_indices,
++                self.forward_metadata.max_extend_len, layer.scaling, k_descale, v_descale,
++            )
++            if not self.mimo_prefill_announced:
++                print("MIMO_PREFILL_GROUPED_DISPATCH G4 T16 N64 W8 S3 bf16", flush=True)
++                self.mimo_prefill_announced = True
++            return o
++
+         # Split-KV EAGLE-verify fast path (ROCm/Triton). On target-verify
+         # (topk=1 causal chain), run the bandwidth-efficient split-KV kernel
+         # instead of the serial-prefix extend kernel. verify_splitkv_fwd()

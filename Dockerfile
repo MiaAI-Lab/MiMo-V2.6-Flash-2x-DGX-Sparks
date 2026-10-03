@@ -33,6 +33,23 @@ LABEL mimo26.dflash_fix="multimodal-dispatch-independent-of-aux-capture"
 LABEL mimo26.eagle_swa_draft_extend="swa-window-buffers"
 LABEL mimo26.swa_window_lock="41580-page-aligned-window"
 LABEL mimo26.gb10_prefill_tile="mimo-tp2-32x64-w4"
+# MiMo full-attention kernels for GB10: split-KV target VERIFY and FA2 prefill.
+# FlashInfer 0.7.0.post1 needs the FP8 QK192/VO128 fix (flashinfer-ai/flashinfer#5085).
+COPY patches/mimo-gb10-attention.patch patches/flashinfer-fp8-qk192-vo128.patch /opt/mimo26/
+COPY patches/mimo_cuda_verify.py patches/mimo_prefill_grouped.py /sgl-workspace/sglang/python/sglang/srt/layers/attention/
+RUN cd /sgl-workspace/sglang/python \
+ && patch --batch --fuzz=0 -p1 < /opt/mimo26/mimo-gb10-attention.patch \
+ && python3 -m py_compile sglang/srt/layers/attention/triton_backend.py sglang/srt/layers/attention/mimo_cuda_verify.py sglang/srt/layers/attention/mimo_prefill_grouped.py \
+ && cd "$(python3 -c 'import flashinfer, os; print(os.path.join(os.path.dirname(flashinfer.__file__), "data"))')" \
+ && printf '%s\n' \
+ 'e66bce2652c0a3c5b54f88510aff2b4b48ff6a52c4ee23fa97f91fa06a935b87  include/flashinfer/attention/prefill.cuh' \
+ '1929a5d1ebb27c67b1e9be3308adf5083957443448d73b6529c0e46c01d7ee84  include/flashinfer/permuted_smem.cuh' | sha256sum --check \
+ && patch --batch --fuzz=0 -p1 < /opt/mimo26/flashinfer-fp8-qk192-vo128.patch
+ENV SGLANG_MIMO_CUDA_VERIFY=1 \
+    SGLANG_MIMO_PREFILL_GROUPED=1 \
+    SGLANG_MIMO_PREFILL_IMPL=flashinfer
+LABEL mimo26.gb10_attention="splitkv-verify+fa2-prefill"
+LABEL mimo26.flashinfer_fix="flashinfer-5085-fp8-qk192-vo128"
 # Image, video, and audio. The MiMo processor decodes audio with torchcodec
 # and shells out to ffprobe for video.
 RUN apt-get update \
