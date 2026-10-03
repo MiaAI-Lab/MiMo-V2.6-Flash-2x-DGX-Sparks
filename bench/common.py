@@ -215,7 +215,7 @@ def stream_chat(model: str, messages: list[dict], *, max_tokens: int, timeout: f
         "decode_window_s": decode_window,
         "prefill_tok_s": (prompt_tokens / ttft) if (ttft and prompt_tokens) else None,
         "decode_tok_s": ((completion_tokens - 1) / decode_window) if (decode_window and completion_tokens > 1) else None,
-        "nan_free": "nan" not in body_text.lower(),
+        "nan_free": re.search(r"(?<!\w)nan(?!\w)", body_text, re.IGNORECASE) is None,
         "text_head": body_text[:160],
     }
 
