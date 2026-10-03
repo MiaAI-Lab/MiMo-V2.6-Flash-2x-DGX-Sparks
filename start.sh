@@ -79,7 +79,7 @@ HF_REPO="${HF_REPO:-XiaomiMiMo/MiMo-V2.6-Flash-RL}"
 HF_REVISION="${HF_REVISION:-3b38d063180c3e4aed9691fdc735f3d10b266ee4}"
 EXPECTED_SHARDS="${EXPECTED_SHARDS:-64}"
 
-BASE_IMAGE="${BASE_IMAGE:-lmsysorg/sglang:nightly-dev-cu13-20260921-0f6761b5}"
+BASE_IMAGE="${BASE_IMAGE:-lmsysorg/sglang:nightly-dev-cu13-20261003-65f75914}"
 IMAGE="${IMAGE:-mimo26-spark:local}"
 HEAD_CTN="${HEAD_CTN:-mimo26-head}"
 WORKER_CTN="${WORKER_CTN:-mimo26-worker}"
@@ -314,6 +314,11 @@ runtime_env() {
     -e "SPEC_DRAFT_TOKENS=${SPEC_DRAFT_TOKENS:-4}"
     -e "SPEC_DRAFT_MODEL=${SPEC_DRAFT_MODEL:-}"
     -e "ENABLE_MTP=${ENABLE_MTP:-1}"
+    -e "SGLANG_SWA_LOCK_WINDOW_ONLY=${SGLANG_SWA_LOCK_WINDOW_ONLY:-1}"
+    -e "SGLANG_GB10_MIMO_EXTEND_TUNING=${SGLANG_GB10_MIMO_EXTEND_TUNING:-1}"
+    -e "SGLANG_MIMO_CUDA_VERIFY=${SGLANG_MIMO_CUDA_VERIFY:-1}"
+    -e "SGLANG_MIMO_PREFILL_GROUPED=${SGLANG_MIMO_PREFILL_GROUPED:-1}"
+    -e "SGLANG_MIMO_PREFILL_IMPL=${SGLANG_MIMO_PREFILL_IMPL:-flashinfer}"
     -e "REASONING_PARSER=${REASONING_PARSER:-mimo}"
     -e "TOOL_CALL_PARSER=${TOOL_CALL_PARSER:-mimo}"
     -e "WATCHDOG_TIMEOUT=${WATCHDOG_TIMEOUT:-1800}"
@@ -682,7 +687,10 @@ cmd_serve() {
   local -a nccl_args=()
   nccl_mount_args nccl_args || die "NCCL mount setup failed"
   local head_cid
+  # The image HEALTHCHECK (30s timeout, 3 retries) goes through the scheduler,
+  # which answers late during long (512k) prefill chunks; relax it on the head.
   head_cid=$(docker run -d --name "$HEAD_CTN" --restart=no \
+    --health-timeout "${HEALTH_TIMEOUT:-120s}" --health-retries "${HEALTH_RETRIES:-10}" \
     --network host --ipc host --privileged --cap-add IPC_LOCK --gpus all \
     --shm-size "${SHM_SIZE:-32g}" \
     --ulimit memlock=-1:-1 --ulimit stack=67108864 \

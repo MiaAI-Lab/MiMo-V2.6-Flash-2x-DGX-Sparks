@@ -36,6 +36,7 @@ a no-op once upstream carries the fix.
 from __future__ import annotations
 
 import importlib.abc
+import functools
 import inspect
 import json
 import os
@@ -234,11 +235,35 @@ def install_nextn(nextn):
     return "installed (MTP fused qkv at TP != checkpoint TP)"
 
 
+def install_mimo_vision(vision_module):
+    # Only MiMo vision opts into real-key-zero bias; text/audio and generic
+    # VisionTritonAttention callers retain their original defaults.
+    cls = vision_module.MiMoVisionBlock
+    if getattr(cls, '_mimo26_key0_sink', False):
+        return 'already installed'
+    original = cls.__init__
+
+    @functools.wraps(original)
+    def init(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        from sglang.srt.layers.attention.vision import VisionTritonAttention
+        if isinstance(self.attn.qkv_backend, VisionTritonAttention):
+            from sglang.kernels.ops.attention.prefill_attention import context_attention_fwd
+            if 'key0_sink' not in inspect.signature(context_attention_fwd).parameters:
+                raise RuntimeError('MiMo vision requires the window/key0 image patch; rebuild with ./start.sh build')
+            self.attn.qkv_backend.mimo_vision_key0_sink = True
+
+    cls.__init__ = init
+    cls._mimo26_key0_sink = True
+    return 'MiMo vision opts into inclusive window and real key0 sink bias'
+
+
 # ─── import hook ─────────────────────────────────────────────────────────────
 
 INSTALLERS = {
     "sglang.srt.model_loader.loader": install_loader,
     "sglang.srt.models.mimo_v2_nextn": install_nextn,
+    "sglang.srt.models.mimo_vl": install_mimo_vision,
 }
 
 

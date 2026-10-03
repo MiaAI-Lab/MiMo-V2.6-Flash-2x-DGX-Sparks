@@ -1,0 +1,86 @@
+{
+  "engine_commit": "0f6761b54facebb47f2068f87ecccd8f14da3a0e",
+  "model_revision": "3b38d063180c3e4aed9691fdc735f3d10b266ee4",
+  "model_source_sha256": "12e02fe45c0ab307cb8055fdcdebac754e02b448cb360a81274f4f393f3447fd",
+  "speculative_algorithm": "DFLASH",
+  "draft_tokens": 8,
+  "target_and_draft_kv_dtype": "fp8_e4m3",
+  "decode_graph_batch_sizes": [
+    1,
+    2,
+    4
+  ],
+  "chunked_prefill_size": 2048,
+  "temperature": 0,
+  "enable_thinking": false,
+  "checks": [
+    {
+      "case": "fhd",
+      "response": "```json\n[\n  {\"card\": 873, \"color\": \"green\"}\n]\n```",
+      "usage": {
+        "prompt_tokens": 2091,
+        "total_tokens": 2113,
+        "completion_tokens": 22,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "image_tokens": 2040
+        },
+        "reasoning_tokens": 0
+      },
+      "finish_reason": "stop",
+      "wall_s": 2.0948246399639174,
+      "passed": true
+    },
+    {
+      "case": "4k",
+      "response": "```json\n[\n  {\"card\": 651, \"color\": \"yellow\"}\n]\n```",
+      "usage": {
+        "prompt_tokens": 8211,
+        "total_tokens": 8233,
+        "completion_tokens": 22,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "image_tokens": 8160
+        },
+        "reasoning_tokens": 0
+      },
+      "finish_reason": "stop",
+      "wall_s": 8.101521866046824,
+      "passed": true
+    },
+    {
+      "case": "repeated",
+      "response": "```json\n[\n  {\"card\": 873, \"color\": \"green\"},\n  {\"card\": 126, \"color\": \"red\"},\n  {\"card\": 873, \"color\": \"green\"}\n]\n```",
+      "usage": {
+        "prompt_tokens": 1778,
+        "total_tokens": 1830,
+        "completion_tokens": 52,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "image_tokens": 1728
+        },
+        "reasoning_tokens": 0
+      },
+      "finish_reason": "stop",
+      "wall_s": 2.410700208041817,
+      "passed": true
+    },
+    {
+      "case": "multiturn",
+      "response": "```json\n{\"card\": 873, \"count\": 2, \"color\": \"green\"}\n```",
+      "usage": {
+        "prompt_tokens": 1864,
+        "total_tokens": 1889,
+        "completion_tokens": 25,
+        "prompt_tokens_details": {
+          "cached_tokens": 1792,
+          "image_tokens": 1728
+        },
+        "reasoning_tokens": 0
+      },
+      "finish_reason": "stop",
+      "wall_s": 0.990039655007422,
+      "passed": true
+    }
+  ]
+}
