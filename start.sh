@@ -684,7 +684,10 @@ cmd_serve() {
   local -a nccl_args=()
   nccl_mount_args nccl_args || die "NCCL mount setup failed"
   local head_cid
+  # The image HEALTHCHECK (30s timeout, 3 retries) goes through the scheduler,
+  # which answers late during long (512k) prefill chunks; relax it on the head.
   head_cid=$(docker run -d --name "$HEAD_CTN" --restart=no \
+    --health-timeout "${HEALTH_TIMEOUT:-120s}" --health-retries "${HEALTH_RETRIES:-10}" \
     --network host --ipc host --privileged --cap-add IPC_LOCK --gpus all \
     --shm-size "${SHM_SIZE:-32g}" \
     --ulimit memlock=-1:-1 --ulimit stack=67108864 \
