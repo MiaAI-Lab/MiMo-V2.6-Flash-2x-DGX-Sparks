@@ -78,3 +78,35 @@ Test (inside the engine image, CPU only):
 docker run --rm --entrypoint python3 -v "$PWD:/w:ro" -w /w \
   lmsysorg/sglang:nightly-dev-cu13-20260921-0f6761b5 tests/test_engine_patches.py
 ```
+
+## EAGLE draft-extend CUDA graphs with sliding-window attention
+
+`eagle-swa-draft-extend-cudagraph.patch` backports the two buffer/metadata
+changes from [SGLang PR #29858](https://github.com/sgl-project/sglang/pull/29858)
+to the pinned engine. Draft-extend fills the persistent SWA prefix indices
+and offsets before capture and replay, and its metadata exposes those buffers.
+The pinned translator API is used; non-SWA metadata retains None window fields.
+The Docker build checks the original SHA256 and applies the patch without fuzz.
+
+Run `./start.sh build` to rebuild and transfer the image before serving.
+The CPU regression executes the installed methods with a stand-in for the GPU
+window builder, covering SWA/non-SWA, capture warmup, zero-length padded prefixes,
+replay refresh, address stability and different per-request draft token counts:
+
+```bash
+docker run --rm --entrypoint python3 -v "$PWD:/w:ro" -w /w \
+  "$IMAGE" tests/check_eagle_swa_draft_extend.py
+```
+
+This CPU check does not validate the Triton window kernel or GPU capture.
+After deployment, check capture on both ranks and smoke, then compare output
+quality, speculative acceptance and throughput against eager on the same inputs.
+Acceptance need not decrease monotonically across successive log entries.
+
+## SWA prefix window locks
+
+`swa-prefix-window-lock.patch` backports [PR #41580](https://github.com/sgl-project/sglang/pull/41580) for [issue #41579](https://github.com/sgl-project/sglang/issues/41579). A device SWA lock splits a live, unlocked ancestor so it protects only the remaining page-aligned window. Locked, tombstoned, write-through-pending nodes and host locks preserve their behavior. Full-cache locks and lock-receipt identity are retained. Set `SGLANG_SWA_LOCK_WINDOW_ONLY=0` to disable the optimization. The Docker build verifies both original source hashes and applies with zero fuzz. This fixes admission starvation; it is not a claim of faster token generation.
+
+## GB10 MiMo prefill tile
+
+`gb10-mimo-extend-tile.patch` selects a 32x64 tile with 4 warps for SM121, MiMo TP=2, QK192/V128 and at least 512 extend tokens. It covers BF16 Q/K/V with BF16 or E4M3 KV cache, causal full attention and SWA128/sinks. Custom masks, score modifiers, other shapes/architectures and short draft/verify steps keep the original path. The build checks the original kernel hash. `SGLANG_GB10_MIMO_EXTEND_TUNING=0` disables the selection; start.sh forwards both this switch and `SGLANG_SWA_LOCK_WINDOW_ONLY`. Local workspace benchmark artifacts document numerical tolerance, tested shapes and timings.

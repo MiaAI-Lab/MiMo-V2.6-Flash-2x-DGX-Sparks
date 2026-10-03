@@ -1,0 +1,48 @@
+--- a/sglang/kernels/ops/attention/extend_attention.py
++++ b/sglang/kernels/ops/attention/extend_attention.py
+@@ -946,6 +946,34 @@
+         _get_block_sizes_for_extend_attention(Lq, Lv)
+     )
+ 
++    # GB10 MiMo TP=2: measured with BF16 and paged FP8 KV caches.
++    # Short draft/verify steps retain their original tile and capture geometry.
++    if (
++        _is_cuda
++        and CUDA_CAPABILITY == (12, 1)
++        and envs.SGLANG_GB10_MIMO_EXTEND_TUNING.get()
++        and Lq == 192
++        and Lv == 128
++        and head_num == 32
++        and max_len_extend >= 512
++        and q_extend.dtype == torch.bfloat16
++        and k_extend.dtype == torch.bfloat16
++        and v_extend.dtype == torch.bfloat16
++        and k_buffer.dtype in (torch.bfloat16, torch.float8_e4m3fn)
++        and v_buffer.dtype == k_buffer.dtype
++        and custom_mask is None
++        and is_causal
++        and logit_cap <= 0
++        and xai_temperature_len <= 0
++        and score_mod is None
++        and aux_tensors is None
++        and (
++            (sliding_window_size <= 0 and k_extend.shape[1] == 2 and sinks is None)
++            or (sliding_window_size == 128 and k_extend.shape[1] == 4)
++        )
++    ):
++        BLOCK_M, BLOCK_N, num_warps = 32, 64, 4
++
+     USE_CUSTOM_MASK = custom_mask is not None
+     # Skip custom mask for prefix part
+     SKIP_PREFIX_CUSTOM_MASK = skip_prefix_custom_mask
+--- a/sglang/srt/environ.py
++++ b/sglang/srt/environ.py
+@@ -674,6 +674,8 @@
+     SGLANG_SWA_EVICTION_INTERVAL = EnvInt(128)
+     # Limit device SWA prefix locks to the page-aligned window still needed.
+     SGLANG_SWA_LOCK_WINDOW_ONLY = EnvBool(True)
++    # Measured GB10 MiMo TP=2 prefill tile; disable for generic SM120 geometry.
++    SGLANG_GB10_MIMO_EXTEND_TUNING = EnvBool(True)
+     # Deprecated: the unified radix tree is the default tree cache now, so the
+     # registry no longer reads this. Kept because a few model/arch call sites
+     # still assert on it; do not use in new code.
