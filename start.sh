@@ -79,7 +79,7 @@ HF_REPO="${HF_REPO:-XiaomiMiMo/MiMo-V2.6-Flash-RL}"
 HF_REVISION="${HF_REVISION:-3b38d063180c3e4aed9691fdc735f3d10b266ee4}"
 EXPECTED_SHARDS="${EXPECTED_SHARDS:-64}"
 
-BASE_IMAGE="${BASE_IMAGE:-lmsysorg/sglang:nightly-dev-cu13-20260921-0f6761b5}"
+BASE_IMAGE="${BASE_IMAGE:-lmsysorg/sglang:nightly-dev-cu13-20261003-65f75914}"
 IMAGE="${IMAGE:-mimo26-spark:local}"
 HEAD_CTN="${HEAD_CTN:-mimo26-head}"
 WORKER_CTN="${WORKER_CTN:-mimo26-worker}"

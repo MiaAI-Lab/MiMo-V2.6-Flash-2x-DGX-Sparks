@@ -1,6 +1,8 @@
+diff --git a/sglang/kernels/ops/attention/extend_attention.py b/sglang/kernels/ops/attention/extend_attention.py
+index 38606d9..8ce0fc8 100644
 --- a/sglang/kernels/ops/attention/extend_attention.py
 +++ b/sglang/kernels/ops/attention/extend_attention.py
-@@ -946,6 +946,34 @@
+@@ -946,6 +946,34 @@ def extend_attention_fwd(
          _get_block_sizes_for_extend_attention(Lq, Lv)
      )
  
@@ -35,14 +37,16 @@
      USE_CUSTOM_MASK = custom_mask is not None
      # Skip custom mask for prefix part
      SKIP_PREFIX_CUSTOM_MASK = skip_prefix_custom_mask
+diff --git a/sglang/srt/environ.py b/sglang/srt/environ.py
+index 2eb1531..274de7f 100644
 --- a/sglang/srt/environ.py
 +++ b/sglang/srt/environ.py
-@@ -674,6 +674,8 @@
+@@ -678,6 +678,8 @@ class Envs:
      SGLANG_SWA_EVICTION_INTERVAL = EnvInt(128)
      # Limit device SWA prefix locks to the page-aligned window still needed.
      SGLANG_SWA_LOCK_WINDOW_ONLY = EnvBool(True)
 +    # Measured GB10 MiMo TP=2 prefill tile; disable for generic SM120 geometry.
 +    SGLANG_GB10_MIMO_EXTEND_TUNING = EnvBool(True)
-     # Deprecated: the unified radix tree is the default tree cache now, so the
-     # registry no longer reads this. Kept because a few model/arch call sites
-     # still assert on it; do not use in new code.
+     # The tree-core registry falls back to Python for:
+     # - Session-aware caching.
+     # - C128 or other unsupported components.

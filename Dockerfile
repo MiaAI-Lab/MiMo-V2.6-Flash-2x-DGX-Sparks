@@ -4,7 +4,7 @@
 # allocates the experts as FP8, ~151 GiB per rank at EP=2, and takes the Spark
 # down with it. start.sh passes BASE_IMAGE from the profile; boot.py refuses to
 # launch on an engine that lacks the packed layout.
-ARG BASE_IMAGE=lmsysorg/sglang:nightly-dev-cu13-20260921-0f6761b5
+ARG BASE_IMAGE=lmsysorg/sglang:nightly-dev-cu13-20261003-65f75914
 FROM ${BASE_IMAGE}
 ARG BASE_IMAGE
 LABEL mimo26.base="${BASE_IMAGE}"
@@ -13,12 +13,12 @@ COPY patches/vision-attention.patch patches/dflash-multimodal.patch patches/eagl
 RUN cd /sgl-workspace/sglang/python \
  && printf '%s\n' \
  'f061599bb2c9243d50b565281c47de077ccc90135b9b1e5320a07425bedac112  sglang/kernels/ops/attention/extend_attention.py' \
- '5ce4ca80ae1bd0714fbc75dab1e1849c082976e01b2cdadd6f7ea2ed48595cbf  sglang/srt/environ.py' \
- '953f7ac05e5e12f4e316f68eceebb7465b9db656390b54c39bef0a20271d2ebc  sglang/srt/mem_cache/unified_cache/components/swa.py' \
- '52cea3ae2d780e9f20c0798ac2f16b5f944924461a90ab36c42f468890b2a79b  sglang/srt/layers/attention/triton_backend.py' \
+ 'c46492ccb53c64882dfd60a3a9c18b76d08e27c3a6514c4e765761c795a202d7  sglang/srt/environ.py' \
+ '03f5ef9efe3b0fdd2175d9bc6e94fb01360e60a9b002e0fb2c17eec68121e570  sglang/srt/mem_cache/unified_cache/components/swa.py' \
+ '3c0684320fef964c5320213547a474aaf430c87edf9283de1c9008d89e6e6228  sglang/srt/layers/attention/triton_backend.py' \
  'eb158c4c03e69091eb95a1bce093c9b054ac1ca5aab12769063d2e84630ca7f3  sglang/kernels/ops/attention/prefill_attention.py' \
- '00ff69ab2f2fdfb74e319789aad47291bf84ba675d6bf227de4e3a5c5d5ca192  sglang/srt/layers/attention/vision.py' \
- 'a3dd3c7e9d59345c1e435cf43bf569ed1e5dd0ce75a588881283399de8e79656  sglang/srt/models/mimo_v2.py' | sha256sum --check \
+ 'f54da17e49896af7c5e9213675f224a770d31211bd5553ed310fc1ef2002967e  sglang/srt/layers/attention/vision.py' \
+ '80a828359da423b13327f2ea28fca9da80bd11d3ca0c9d488cbee656fe0d633e  sglang/srt/models/mimo_v2.py' | sha256sum --check \
  && cp sglang/kernels/ops/attention/prefill_attention.py /opt/mimo26/original_prefill_attention.py \
  && cp sglang/srt/layers/attention/triton_backend.py /opt/mimo26/original_triton_backend.py \
  && cp sglang/srt/models/mimo_v2.py /opt/mimo26/original_mimo_v2.py \

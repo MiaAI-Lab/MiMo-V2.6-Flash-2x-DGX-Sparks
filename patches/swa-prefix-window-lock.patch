@@ -1,17 +1,21 @@
+diff --git a/sglang/srt/environ.py b/sglang/srt/environ.py
+index b205189..2eb1531 100644
 --- a/sglang/srt/environ.py
 +++ b/sglang/srt/environ.py
-@@ -672,6 +672,8 @@
+@@ -676,6 +676,8 @@ class Envs:
      SGLANG_OPT_UNIFIED_CACHE_FREE_OUT_OF_WINDOW_SLOTS = EnvBool(True)
      # Decode batches between SWA out-of-window evictions.
      SGLANG_SWA_EVICTION_INTERVAL = EnvInt(128)
 +    # Limit device SWA prefix locks to the page-aligned window still needed.
 +    SGLANG_SWA_LOCK_WINDOW_ONLY = EnvBool(True)
-     # Deprecated: the unified radix tree is the default tree cache now, so the
-     # registry no longer reads this. Kept because a few model/arch call sites
-     # still assert on it; do not use in new code.
+     # The tree-core registry falls back to Python for:
+     # - Session-aware caching.
+     # - C128 or other unsupported components.
+diff --git a/sglang/srt/mem_cache/unified_cache/components/swa.py b/sglang/srt/mem_cache/unified_cache/components/swa.py
+index e5263d9..d465150 100644
 --- a/sglang/srt/mem_cache/unified_cache/components/swa.py
 +++ b/sglang/srt/mem_cache/unified_cache/components/swa.py
-@@ -583,6 +583,33 @@
+@@ -580,6 +580,33 @@ class SWAComponent(TreeComponent):
          assert action is None, "fresh SWA leaf cannot be write-through-pending"
          return new_parent
  
@@ -45,7 +49,7 @@
      def redistribute_on_node_split(
          self, new_parent: UnifiedTreeNode, child: UnifiedTreeNode
      ):
-@@ -799,8 +826,11 @@
+@@ -823,8 +850,11 @@ class SWAComponent(TreeComponent):
              else self.tree_core.lru_lists[ct]
          )
  

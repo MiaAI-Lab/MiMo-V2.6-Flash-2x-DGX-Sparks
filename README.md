@@ -44,7 +44,7 @@ image-forwarding fix.
   cannot serve this model at all — 161 GiB of weights on a 121.7 GiB box.
 - ~161 GiB of free disk on the head for the checkpoint, plus Docker.
 - Passwordless ssh from the head to the worker.
-- `BASE_IMAGE=lmsysorg/sglang:nightly-dev-cu13-20260921-0f6761b5` or newer:
+- `BASE_IMAGE=lmsysorg/sglang:nightly-dev-cu13-20261003-65f75914` (the Dockerfile pins this nightly's source hashes; the oldest engine with the packed MXFP4 experts is lmsysorg/sglang:nightly-dev-cu13-20260921-0f6761b5):
   MiMo-V2.6's MXFP4 experts need
   [sgl-project/sglang#40448](https://github.com/sgl-project/sglang/pull/40448).
   Older engines expand the experts to FP8 and take the node down.
