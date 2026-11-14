@@ -37,7 +37,7 @@ DIST_INIT_ADDR = os.environ.get('DIST_INIT_ADDR', '')
 SERVED_MODEL_NAME = os.environ.get('SERVED_MODEL_NAME', 'MiMo-v2.6-Flash')
 
 # First public image with sgl-project/sglang#40448 (MiMo-V2 MXFP4 experts).
-MIN_BASE_IMAGE = 'lmsysorg/sglang:nightly-dev-cu13-20260921-0f6761b5'
+MIN_BASE_IMAGE = 'lmsysorg/sglang:v0.5.21-cu130@sha256:b1259f3ea3275f66237c498ea388919729018bc9f01c3d638391e06e2cf3f469'
 
 # safetensors dtype tags → bytes per element.
 DTYPE_BYTES = {
