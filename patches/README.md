@@ -33,5 +33,5 @@ Test (inside the engine image, CPU only):
 
 ```bash
 docker run --rm --entrypoint python3 -v "$PWD:/w:ro" -w /w \
-  lmsysorg/sglang:nightly-dev-cu13-20260921-0f6761b5 tests/test_engine_patches.py
+  lmsysorg/sglang:v0.5.21-cu130@sha256:b1259f3ea3275f66237c498ea388919729018bc9f01c3d638391e06e2cf3f469 tests/test_engine_patches.py
 ```

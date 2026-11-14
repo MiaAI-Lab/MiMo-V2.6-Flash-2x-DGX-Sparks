@@ -4,7 +4,7 @@
 # allocates the experts as FP8, ~151 GiB per rank at EP=2, and takes the Spark
 # down with it. start.sh passes BASE_IMAGE from the profile; boot.py refuses to
 # launch on an engine that lacks the packed layout.
-ARG BASE_IMAGE=lmsysorg/sglang:nightly-dev-cu13-20260921-0f6761b5
+ARG BASE_IMAGE=lmsysorg/sglang:v0.5.21-cu130@sha256:b1259f3ea3275f66237c498ea388919729018bc9f01c3d638391e06e2cf3f469
 FROM ${BASE_IMAGE}
 ARG BASE_IMAGE
 LABEL mimo26.base="${BASE_IMAGE}"

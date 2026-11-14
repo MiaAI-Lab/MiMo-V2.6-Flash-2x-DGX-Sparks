@@ -39,7 +39,7 @@ else to a Spark.
   cannot serve this model at all — 161 GiB of weights on a 121.7 GiB box.
 - ~161 GiB of free disk on the head for the checkpoint, plus Docker.
 - Passwordless ssh from the head to the worker.
-- `BASE_IMAGE=lmsysorg/sglang:nightly-dev-cu13-20260921-0f6761b5` or newer:
+- `BASE_IMAGE=lmsysorg/sglang:v0.5.21-cu130@sha256:b1259f3ea3275f66237c498ea388919729018bc9f01c3d638391e06e2cf3f469` or newer:
   MiMo-V2.6's MXFP4 experts need
   [sgl-project/sglang#40448](https://github.com/sgl-project/sglang/pull/40448).
   Older engines expand the experts to FP8 and take the node down.
@@ -935,7 +935,7 @@ weights are Xiaomi's and are not part of this repository.
 python3 -m unittest tests.test_boot_args -v     # arg planner + memory preflight, no torch needed
 bash tests/test_stop_restart.sh                 # stop/restart guard rails; safe against a live fleet
 docker run --rm --entrypoint python3 -v "$PWD:/w:ro" -w /w \
-  lmsysorg/sglang:nightly-dev-cu13-20260921-0f6761b5 tests/test_engine_patches.py   # MTP qkv patch, CPU
+  lmsysorg/sglang:v0.5.21-cu130@sha256:b1259f3ea3275f66237c498ea388919729018bc9f01c3d638391e06e2cf3f469 tests/test_engine_patches.py   # MTP qkv patch, CPU
 ```
 
 Measured loads at TP=2 (`Load weight end` lines):
